@@ -8,12 +8,10 @@ const RosConnectionManagerTest = () => {
     const connectionManager = ConnectionManager.getInstance();
 
     useEffect(() => {
-        // Register callback to receive status updates
         connectionManager.registerStatusCallback((newStatus) => {
             setStatus(newStatus);
         });
 
-        // Cleanup on unmount: reset callback to prevent memory leaks
         return () => {
             connectionManager.registerStatusCallback(() => {});
         };
