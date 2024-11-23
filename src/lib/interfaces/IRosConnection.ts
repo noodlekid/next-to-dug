@@ -1,7 +1,10 @@
+import { ConnectionEvents } from "../events/ConnectionEvents";
+
 export interface IRosConnection {
-    connect(url: string): void;
+    connect(url?: string): void;
     close(): void;
-    on(event:string, callback: (...args: unknown[]) => void): void;
+    on(event: ConnectionEvents, callback: (...args: unknown[]) => void): void;
+    off(event: ConnectionEvents, callback: (...args: unknown[]) => void): void;
     isConnected(): boolean;
 }
 
