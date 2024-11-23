@@ -12,4 +12,7 @@ export type ConnectionEventPayloads = {
     [ConnectionEvents.CLOSE]: () => void;
     [ConnectionEvents.FAILED_TO_RECONNECT]: () => void;
     [ConnectionEvents.ENTER_SAFE_STATE]: (reason: string) => void;
+    /*  TODO: Add events like RECONNECTING, DISCONNECTED, HEARTBEAT_TIMEOUT for
+    *   more fine control.
+    */
 }

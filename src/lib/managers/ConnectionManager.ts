@@ -49,6 +49,7 @@ export class ConnectionManager implements IConnectionManager {
         // Stop hearbeat once I actually implement heart beat
         this.stopHeartbeat()
         this.rosConnection.close();
+        this.rosConnection = null;
       }
     }
 
