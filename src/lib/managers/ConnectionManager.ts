@@ -15,6 +15,7 @@ export class ConnectionManager implements IConnectionManager {
     private eventEmitter: TypedEmmiter<ConnectionEventPayloads>;
     private heartbeatIntervalId: NodeJS.Timeout | null = null;
     private listenerMap: Map<string, (...args: unknown[]) => void> = new Map();
+    private statusCallback: ((status: string) => void) | null = null;
 
     private constructor() {
         this.eventEmitter = new EventEmitter() as TypedEmmiter<ConnectionEventPayloads>
@@ -53,6 +54,15 @@ export class ConnectionManager implements IConnectionManager {
       }
     }
 
+    public registerStatusCallback(callback: (status:string) => void): void {
+        this.statusCallback = callback;
+    }
+
+    private updateStatus(status: string): void {
+        if (this.statusCallback) {
+            this.statusCallback(status);
+        }
+    }
 
     // TODO: Temporary shit fix to make sure the listener conform to the right type
     public on<K extends keyof ConnectionEventPayloads>(event: K, listener: ConnectionEventPayloads[K]): void {
@@ -108,6 +118,7 @@ export class ConnectionManager implements IConnectionManager {
 
     private handleConnection(): void {
         console.log('Connected to ROS.');
+        this.updateStatus('Connected')
         this.reconnectionAttempts = 0;
         // Insert some other shit to handle heart beat
         this.startHeartbeat()
@@ -133,6 +144,7 @@ export class ConnectionManager implements IConnectionManager {
                 }, Math.pow(2, this.reconnectionAttempts) * 1000);
             } else {
                 console.error('Max reconnection attempts reached.');
+                this.updateStatus('Failed to reconnect')
                 this.eventEmitter.emit(ConnectionEvents.FAILED_TO_RECONNECT);
             }
         } else {
@@ -142,8 +154,8 @@ export class ConnectionManager implements IConnectionManager {
 
     private handleClose(): void {
         console.warn('Connection to ROS closed.');
+        this.updateStatus('Disconnected')
         this.handleError(new Error('Reconnecting after unexpected close.'));
-
     }
 
     private startHeartbeat(): void {

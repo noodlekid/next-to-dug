@@ -1,43 +1,31 @@
 "use client"
 import React, { useState, useEffect } from 'react';
 import { ConnectionManager } from '@/lib/managers/ConnectionManager';
-import { ConnectionEvents } from '@/lib/events/ConnectionEvents';
 
 const RosConnectionManagerTest = () => {
     const [urls, setUrls] = useState('ws://localhost:9090');
     const [status, setStatus] = useState('Not Connected');
-    const [connectionManager, setConnectionManager] = useState<ConnectionManager | null>(null);
+    const connectionManager = ConnectionManager.getInstance();
 
     useEffect(() => {
-        const manager = ConnectionManager.getInstance();
-        setConnectionManager(manager);
+        // Register callback to receive status updates
+        connectionManager.registerStatusCallback((newStatus) => {
+            setStatus(newStatus);
+        });
 
-        const handleConnected = () => setStatus('Connected');
-        const handleError = (error: { message: unknown; }) => setStatus(`Error: ${error.message}`);
-        const handleClosed = () => setStatus('Disconnected');
-
-        manager.on(ConnectionEvents.CONNECTED, handleConnected);
-        manager.on(ConnectionEvents.ERROR, handleError);
-        manager.on(ConnectionEvents.CLOSE, handleClosed);
-
+        // Cleanup on unmount: reset callback to prevent memory leaks
         return () => {
-            manager.off(ConnectionEvents.CONNECTED, handleConnected);
-            manager.off(ConnectionEvents.ERROR, handleError);
-            manager.off(ConnectionEvents.CLOSE, handleClosed);
+            connectionManager.registerStatusCallback(() => {});
         };
-    }, []);
+    }, [connectionManager]);
 
     const connect = () => {
-        if (connectionManager) {
-            const urlArray = urls.split(',').map(url => url.trim());
-            connectionManager.connect(urlArray);
-        }
+        const urlArray = urls.split(',').map(url => url.trim());
+        connectionManager.connect(urlArray);
     };
 
     const disconnect = () => {
-        if (connectionManager) {
-            connectionManager.disconnect();
-        }
+        connectionManager.disconnect();
     };
 
     return (

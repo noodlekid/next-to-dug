@@ -1,5 +1,5 @@
 import React from 'react';
-import RosConnectionManagerTest from './ros-connection-manager-test'; // Import your new component
+import RosConnectionManagerTest from './ros-connection-manager-test';
 
 const HomePage = () => {
     return (
