@@ -8,6 +8,7 @@ import { ConnectionEventPayloads, ConnectionEvents } from '../events/ConnectionE
 
 export class RosConnection implements IRosConnection {
     private ros: Ros;
+    private listenerMap: Map<ConnectionEvents, ConnectionEventPayloads[ConnectionEvents]> = new Map();
 
 
     constructor(options: RosOptions) {
@@ -15,7 +16,7 @@ export class RosConnection implements IRosConnection {
     }
 
     public close(): void {
-        this.removeAllListners();
+        this.removeAllListeners();
         this.ros.close();
     }
     
@@ -24,12 +25,16 @@ export class RosConnection implements IRosConnection {
     }
     
     public on<K extends keyof ConnectionEventPayloads>(event: K, callback: ConnectionEventPayloads[K]): this {
+        this.listenerMap.set(event, callback);
         this.ros.on(event, callback);
         return this;
     }
 
     public off<K extends keyof ConnectionEventPayloads>(event: K, callback: ConnectionEventPayloads[K]): this {
-        this.ros.off(event, callback);
+        if (this.listenerMap.has(event)) {
+            this.ros.off(event, callback);
+            this.listenerMap.delete(event);
+        }
         return this;
     }
 
@@ -37,12 +42,11 @@ export class RosConnection implements IRosConnection {
         return this.ros.isConnected;
     }
 
-    private removeAllListners(): void {
-        this.ros.off(ConnectionEvents.CONNECTED, () => {});
-        this.ros.off(ConnectionEvents.ERROR, () => {});
-        this.ros.off(ConnectionEvents.CLOSE, () => {});
-        this.ros.off(ConnectionEvents.FAILED_TO_RECONNECT, () => {});
-        this.ros.off(ConnectionEvents.ENTER_SAFE_STATE, () => {});
+    private removeAllListeners(): void {
+        this.listenerMap.forEach((listener, event) => {
+            this.ros.off(event, listener);
+        });
+        this.listenerMap.clear(); // Clear the map after removing all listeners
     }
 
 }
