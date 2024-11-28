@@ -1,21 +1,14 @@
 "use client"
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState, useReducer } from 'react';
 import { ConnectionManager } from '@/lib/managers/ConnectionManager';
+import { ConnectionEvents } from '@/lib/events/ConnectionEvents';
+
+const connectionManager = ConnectionManager.getInstance();
 
 const RosConnectionManagerTest = () => {
+
     const [urls, setUrls] = useState('ws://localhost:9090');
-    const [status, setStatus] = useState('Not Connected');
-    const connectionManager = ConnectionManager.getInstance();
-
-    useEffect(() => {
-        connectionManager.registerStatusCallback((newStatus) => {
-            setStatus(newStatus);
-        });
-
-        return () => {
-            connectionManager.registerStatusCallback(() => {});
-        };
-    }, [connectionManager]);
+    const [connectionStatus, setConnectionStatus] = useState<string>(false);
 
     const connect = () => {
         const urlArray = urls.split(',').map(url => url.trim());
@@ -25,6 +18,16 @@ const RosConnectionManagerTest = () => {
     const disconnect = () => {
         connectionManager.disconnect();
     };
+
+    useEffect(() => {
+        var tempStatus = 'not connected'
+        if (connectionManager.isConnected()) {
+            tempStatus = 'connected'
+        } 
+
+        setConnectionStatus(tempStatus);
+
+    }, [ConnectionManager])
 
     return (
         <div>
@@ -39,7 +42,7 @@ const RosConnectionManagerTest = () => {
             /><br /><br />
             <button onClick={connect}>Connect</button>
             <button onClick={disconnect}>Disconnect</button>
-            <p id="status">Status: {status}</p>
+            <p>{connectionStatus}</p>
         </div>
     );
 };

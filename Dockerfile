@@ -28,12 +28,12 @@ RUN apt-get update && \
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
 # Copy app files
-COPY . /app
+# COPY . /app
 
 # Expose ROS bridge and web server ports
 EXPOSE 9090
 EXPOSE 3000
 
 # Start script for ROS bridge and web server
-RUN npm run build
-CMD ["bash", "-c", "source /opt/ros/humble/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml & npm start"]
+
+CMD ["bash", "-c", "source /opt/ros/humble/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml & npm run dev"]

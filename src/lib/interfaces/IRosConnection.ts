@@ -1,4 +1,5 @@
 import { ConnectionEvents } from "../events/ConnectionEvents";
+import { Ros } from 'roslib';
 
 export interface IRosConnection {
     connect(url?: string): void;
@@ -6,6 +7,8 @@ export interface IRosConnection {
     on(event: ConnectionEvents, callback: (...args: unknown[]) => void): void;
     off(event: ConnectionEvents, callback: (...args: unknown[]) => void): void;
     isConnected(): boolean;
+    getRosInstance(): Ros;
+    handleUnexpectedDisconnect(): void;
 }
 
 export type RosOptions = {

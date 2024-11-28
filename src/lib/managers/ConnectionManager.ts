@@ -3,24 +3,42 @@ import { IRosConnection } from "../interfaces/IRosConnection";
 import { ConnectionEventPayloads, ConnectionEvents } from '../events/ConnectionEvents';
 import { createRosConnection } from '../connections/RosConnectionFactory';
 
-import TypedEmmiter from 'typed-emitter'
+import TypedEmitter from 'typed-emitter';
 import EventEmitter from 'events';
+import { IRosClient } from "../interfaces/IRosClient";
+import { RosClient } from "../clients/RosClient";
 
 export class ConnectionManager implements IConnectionManager {
     private static instance: ConnectionManager;
-    private rosConnection: IRosConnection | null = null;
-    private connectionUrls: string[]= [];
+    public rosConnection: IRosConnection | null = null;
+    private rosClient: IRosClient | null = null;
+    private connectionUrls: string[] = [];
     private currentUrlIndex: number = 0;
     private reconnectionAttempts: number = 0;
-    private eventEmitter: TypedEmmiter<ConnectionEventPayloads>;
+    private reconnectionTimeoutId: NodeJS.Timeout | null = null;
+    private eventEmitter: TypedEmitter<ConnectionEventPayloads>;
     private heartbeatIntervalId: NodeJS.Timeout | null = null;
-    private listenerMap: Map<string, (...args: unknown[]) => void> = new Map();
-    private statusCallback: ((status: string) => void) | null = null;
+    private listenerMap: Map<ConnectionEvents, (...args: unknown[]) => void> = new Map();
 
     private constructor() {
-        this.eventEmitter = new EventEmitter() as TypedEmmiter<ConnectionEventPayloads>
+        this.eventEmitter = new EventEmitter() as TypedEmitter<ConnectionEventPayloads>;
+
+        // Attach internal handlers only once
+        this.eventEmitter.on(ConnectionEvents.CONNECTED, this.handleConnection.bind(this));
+        this.eventEmitter.on(ConnectionEvents.ERROR, this.handleError.bind(this));
+        this.eventEmitter.on(ConnectionEvents.CLOSE, this.handleClose.bind(this));
     }
 
+    public getRosClient(): IRosClient {
+        if (!this.rosConnection || !this.isConnected()) {
+            throw new Error('No ROS connection available.');
+        }
+        if (!this.rosClient) {
+            this.rosClient  = new RosClient(this.rosConnection);
+        }
+
+        return this.rosClient;
+    }
 
     public static getInstance(): ConnectionManager {
         if (!ConnectionManager.instance) {
@@ -36,7 +54,7 @@ export class ConnectionManager implements IConnectionManager {
         }
 
         if (!urls || urls.length === 0) {
-            throw new Error('At least one ROS bridge URL muts be provided.')
+            throw new Error('At least one ROS bridge URL must be provided.');
         }
 
         this.connectionUrls = urls;
@@ -45,123 +63,122 @@ export class ConnectionManager implements IConnectionManager {
     }
 
     public disconnect(): void {
-      if (this.rosConnection && this.isConnected()) {
-        console.log('Disconnecting from ROS...');
-        // Stop hearbeat once I actually implement heart beat
-        this.stopHeartbeat()
-        this.rosConnection.close();
-        this.rosConnection = null;
-      }
-    }
+        if (this.rosConnection && this.isConnected()) {
+            console.log('Disconnecting from ROS...');
+            this.stopHeartbeat();
+            this.rosConnection.close();
+            this.rosConnection = null;
+            console.log('Disconnected from ROS!');
+        }
 
-    public registerStatusCallback(callback: (status:string) => void): void {
-        this.statusCallback = callback;
-    }
-
-    private updateStatus(status: string): void {
-        if (this.statusCallback) {
-            this.statusCallback(status);
+        if (this.reconnectionTimeoutId) {
+            clearTimeout(this.reconnectionTimeoutId);
+            this.reconnectionTimeoutId = null;
         }
     }
 
-    // TODO: Temporary shit fix to make sure the listener conform to the right type
     public on<K extends keyof ConnectionEventPayloads>(event: K, listener: ConnectionEventPayloads[K]): void {
-        if (this.rosConnection) {
-            // wrapper for the listener that matches the type expected by rosConnection
-            const wrapper = (...args: unknown[]): void => {
-                if (event === ConnectionEvents.ERROR && args[0] instanceof Error) {
-                    (listener as (error: Error) => void)(args[0]);
-                } else if (event === ConnectionEvents.ENTER_SAFE_STATE && typeof args[0] === 'string') {
-                    (listener as (reason: string) => void)(args[0]);
-                } else if (args.length === 0) {
-                    (listener as () => void)();
-                }
-            };
-    
-            // Store the wrapper so it can be tossed out later
-            this.listenerMap.set(event.toString() + listener.toString(), wrapper);
-    
-            this.rosConnection.on(event, wrapper);
-        }
-    
         this.eventEmitter.on(event, listener);
     }
 
     public off<K extends keyof ConnectionEventPayloads>(event: K, listener: ConnectionEventPayloads[K]): void {
-        if (this.rosConnection) {
-            const key = event.toString() + listener.toString();
-            // Uses the shit fix wrapper to ensure typing
-            const wrapper = this.listenerMap.get(key);
-            if (wrapper) {
-                this.rosConnection.off(event, wrapper);
-                this.listenerMap.delete(key);
-            }
-        }
-    
         this.eventEmitter.off(event, listener);
     }
 
     public isConnected(): boolean {
-        return this.rosConnection ? this.rosConnection.isConnected(): false;
+        return this.rosConnection ? this.rosConnection.isConnected() : false;
     }
 
     private establishConnection(url: string): void {
+
+        if (this.rosConnection && this.isConnected()) {
+            console.warn('Already connected to ROS.');
+            return;
+        }
+
+        if (this.rosConnection) {
+            console.log('Cleaning up previous listeners before reconnecting...');
+            this.cleanupListeners();
+            this.rosConnection.close();
+            this.rosConnection = null;
+        }
+
         const options = { url: url };
-        this.rosConnection = createRosConnection(options)
+        this.rosConnection = createRosConnection(options);
         console.log(`Connecting to ROS at ${url}...`);
         this.rosConnection.connect();
-    
-        this.rosConnection.on(ConnectionEvents.CONNECTED, this.handleConnection.bind(this));
-        this.rosConnection.on(ConnectionEvents.ERROR, this.handleError.bind(this));
-        this.rosConnection.on(ConnectionEvents.CLOSE, this.handleClose.bind(this));
-      }
+
+        const events: (keyof ConnectionEventPayloads)[] = [
+            ConnectionEvents.CONNECTED,
+            ConnectionEvents.ERROR,
+            ConnectionEvents.CLOSE,
+        ];
+
+        events.forEach((event) => {
+            const relay = (...args: unknown[]) => {
+                this.eventEmitter.emit(event, ...args);
+            };
+
+            this.listenerMap.set(event, relay);
+            this.rosConnection!.on(event, relay);
+        });
+
+        console.log('Listeners attached!');
+    }
 
     private handleConnection(): void {
         console.log('Connected to ROS.');
-        this.updateStatus('Connected')
         this.reconnectionAttempts = 0;
-        // Insert some other shit to handle heart beat
-        this.startHeartbeat()
+
+        if (this.reconnectionTimeoutId) {
+            clearTimeout(this.reconnectionTimeoutId);
+            this.reconnectionTimeoutId = null;
+        }
+        
+        this.stopHeartbeat();
+        this.startHeartbeat();
     }
 
+    private handleError(error: unknown): void {
 
-    /*  TODO: I was thinking maybe implementing a jittering reconnect, but I think the 
-    *   exponential backoff will do just fine for now. Pending testing.
-    */
-    private handleError(...args: unknown[]): void {
-        const error = args[0];
         if (error instanceof Error) {
             console.error('ROS Connection Error:', error.message, error.stack);
-    
-            if (this.reconnectionAttempts < 5) {
-                this.reconnectionAttempts++;
-                console.log(`Reconnection attempt #${this.reconnectionAttempts}`);
-                this.currentUrlIndex = (this.currentUrlIndex + 1) % this.connectionUrls.length;
-    
-                setTimeout(() => {
-                    console.log(`Attempting reconnection to ${this.connectionUrls[this.currentUrlIndex]}...`);
-                    this.establishConnection(this.connectionUrls[this.currentUrlIndex]);
-                }, Math.pow(2, this.reconnectionAttempts) * 1000);
-            } else {
-                console.error('Max reconnection attempts reached.');
-                this.updateStatus('Failed to reconnect')
-                this.eventEmitter.emit(ConnectionEvents.FAILED_TO_RECONNECT);
-            }
         } else {
-            console.error('Unexpected error type:', args);
+            console.error('ROS Connection Error:', error);
+        }
+
+        if (this.reconnectionAttempts < 8) {
+            this.reconnectionAttempts++;
+            console.log(`Reconnection attempt #${this.reconnectionAttempts}`);
+            this.currentUrlIndex = (this.currentUrlIndex + 1) % this.connectionUrls.length;
+            
+            const delay = Math.pow(2, this.reconnectionAttempts) * 1000;
+            this.reconnectionTimeoutId = setTimeout(() => {
+                console.log(`Attempting reconnection to ${this.connectionUrls[this.currentUrlIndex]}...`);
+                this.establishConnection(this.connectionUrls[this.currentUrlIndex]);
+            }, delay);
+        } else {
+            console.error('Max reconnection attempts reached.');
+            this.eventEmitter.emit(ConnectionEvents.FAILED_TO_RECONNECT);
         }
     }
 
     private handleClose(): void {
         console.warn('Connection to ROS closed.');
-        this.updateStatus('Disconnected')
+        this.stopHeartbeat()
+        if (this.rosConnection) {
+            this.rosConnection.handleUnexpectedDisconnect();
+        }
+        this.rosClient = null;
         this.handleError(new Error('Reconnecting after unexpected close.'));
     }
 
     private startHeartbeat(): void {
         if (this.heartbeatIntervalId) return;
-
+    
+        console.log('Heartbeat check initiated.');
         this.heartbeatIntervalId = setInterval(() => {
+            console.log('Is connected:', this.isConnected());
             if (!this.isConnected()) {
                 console.warn('Heartbeat missed. Attempting to reconnect...');
                 this.handleError(new Error('Missed heartbeat.'));
@@ -176,5 +193,23 @@ export class ConnectionManager implements IConnectionManager {
         }
     }
 
+    private cleanupListeners(): void {
+        if (this.rosConnection) {
+            console.log('Removing all existing listeners...');
 
+            const events: (keyof ConnectionEventPayloads)[] = [
+                ConnectionEvents.CONNECTED,
+                ConnectionEvents.ERROR,
+                ConnectionEvents.CLOSE,
+            ];
+
+            events.forEach((event) => {
+                const relay = this.listenerMap.get(event);
+                if (relay) {
+                    this.rosConnection!.off(event, relay);
+                    this.listenerMap.delete(event);
+                }
+            });
+        }
+    }
 }
